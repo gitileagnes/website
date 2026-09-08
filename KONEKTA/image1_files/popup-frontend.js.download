@@ -1,0 +1,632 @@
+( function ($, elementorFrontend){
+
+    'use strict'
+
+    var WdesPopupFrontend = {
+
+        init :function () {
+            var popupList = $ ( '.wdes-popup:not(.wdes-popup-single-preview)' ),
+                isEditor  = Boolean( elementorFrontend.isEditMode() );
+
+            if( ! isEditor ){
+                popupList.each( function (i){
+                    let target =  $( this ) ,
+                        settings = target.data( 'settings' );
+
+                    let instance = new WdesPopupFrontend.popupModal(target, settings);
+                    instance.construct();
+
+                } );
+            }
+
+        },
+
+        popupModal : function ( popup, settings){
+            var self = this,
+                $window = $( window ),
+                id = settings ['id'],
+                popupId = settings['wdes-popup-id'],
+                isEditor = Boolean( elementorFrontend.isEditMode() );
+
+            self.construct = function (){
+                var isAvailable = self.availableCheck();
+
+                if ( ! isAvailable || isEditor ) {
+                    return false;
+                }
+
+                self.setLocalStorageData( popupId, 'enable' );
+
+                self.openModal();
+
+            },
+
+            self.availableCheck = function () {
+                let storageData = self.getLocalStorageData() || {};
+
+                if( ! storageData.hasOwnProperty( popupId ) ){
+                    return true;
+                }
+
+                let popupData = storageData [popupId],
+                    status        = 'enable',
+                    showAgainDate = 'none';
+
+                if ( 'disable' === popupData ){
+                    return false;
+                }
+
+                if( 'enable' === popupData ){
+                    return true;
+                }
+
+                if( popupData.hasOwnProperty('status') ){
+                    status = popupData['status'];
+                }
+
+                if( 'enable' === status ){
+                    return true;
+                }
+
+                if ( popupData.hasOwnProperty('show-again-date') ){
+                    showAgainDate = popupData['show-again-date'];
+                }
+
+                if( 'none' === showAgainDate && 'disable' === status ){
+                    return false;
+                }
+
+                if ( showAgainDate < Date.now() ) {
+                    return true;
+                } else {
+                    return false;
+                }
+
+            },
+
+            self.getLocalStorageData = function (){
+                try {
+                    return JSON.parse( localStorage.getItem( 'wdesPopupData' ) );
+                } catch ( e ) {
+                    return false;
+                }
+
+            }
+
+            self.setLocalStorageData = function (id, status){
+                var wdesPopupData = self.getLocalStorageData() || {},
+                    newData      = {};
+
+                newData['status'] = status;
+
+                if ( 'disable' === status ) {
+
+                    var nowDate             = Date.now(),
+                        showAgainDelay      = settings['show-again-delay'],
+                        showAgainDate       = 'none' !== showAgainDelay ? ( nowDate + showAgainDelay ) : 'none';
+
+                    newData['show-again-date'] = showAgainDate;
+                }
+
+                wdesPopupData[ id ] = newData;
+
+                localStorage.setItem( 'wdesPopupData', JSON.stringify( wdesPopupData ) );
+            },
+
+            self.openModal = function (){
+
+                switch( settings['open-trigger'] ){
+                    case 'page-load':
+                        self.pageLoad( settings['page-load-delay'] );
+                    break;
+
+                    case 'user-inactive':
+                        self.userInactive( settings['user-inactivity-time'] )
+                    break;
+
+                    case 'scroll-trigger':
+                        self.scrollPage( settings['scrolled-to'] );
+                    break;
+
+                    case 'try-exit-trigger':
+                        self.tryExit();
+                    break;
+
+                    case 'on-date':
+                        self.onDate( settings['on-date'] );
+                        break;
+
+                    case 'on-time':
+                        self.onTime( settings['on-time-start'], settings['on-time-end'] );
+                        break;
+
+                }
+
+
+            },
+
+            self.pageLoad = function (delayValue){
+                let delay = Number.isInteger(delayValue) ? delayValue : 0;
+
+                delay = delay * 1000;
+                setTimeout( function (){
+                    self.MicroModalInit();
+                }, delay );
+
+            },
+
+            self.userInactive = function (delayValue){
+                var delay = Number.isInteger(delayValue) ? delayValue : 0,
+                    isInactive = true;
+
+                delay = delay * 1000;
+
+                setTimeout( function (){
+                    if ( isInactive ) {
+                        self.MicroModalInit();
+                    }
+                }, delay );
+
+                $( document ).on( 'click focus resize keyup scroll', function() {
+                    isInactive = false;
+                } );
+
+            },
+
+            self.scrollPage = function (scrollingValue){
+                var scrollValue = Number.isInteger(scrollingValue) ? scrollingValue : 0;
+
+                $window.on('scroll resize', function () {
+                    let windowHeight     = $window.height(),
+                        documentHeight   = $( document ).height(),
+                        scrolledHeight   = documentHeight - windowHeight,
+                        scrolledProgress = Math.max( 0, Math.min( 1, $window.scrollTop() / scrolledHeight ) ) * 100;
+
+                    if ( scrolledProgress >= scrollValue ) {
+                        $window.off( 'scroll resize' );
+                        self.MicroModalInit();
+                    }
+
+                });
+            },
+            self.tryExit = function () {
+                var pageY = 0;
+
+                $( document ).on( 'mouseleave', 'body', function( event ) {
+
+                    pageY = event.pageY - $window.scrollTop();
+
+                    if ( 0 > pageY && ! popup.hasClass( 'is-open' ) ) {
+                        self.MicroModalInit();
+                    }
+                } );
+            },
+            self.onDate = function( date ) {
+                var nowDate   = Date.now(),
+                    startDate = Date.parse( date );
+                if ( startDate < nowDate ) {
+
+                    setTimeout( function() {
+                        self.MicroModalInit();
+                    }, 500 );
+                }
+            },
+
+            self.onTime = function( startTime = '00:00', endTime = '23:59' ) {
+                var startTime = '' !== startTime ? startTime : '00:00',
+                    endTime = '' !== endTime ? endTime : '23:59',
+                    nowTimeStamp = Date.now(),
+                    dateTimeFormat = new Intl.DateTimeFormat( 'en', { year: 'numeric', month: 'short', day: '2-digit' } ),
+                    [ { value: month },,{ value: day },,{ value: year } ] = dateTimeFormat.formatToParts( nowTimeStamp ),
+                    startTime = `${ month }. ${ day }, ${ year } ${ startTime }`,
+                    endTime = `${ month }. ${ day }, ${ year } ${ endTime }`,
+                    startTimeStamp = Date.parse( startTime ),
+                    endTimeStamp = Date.parse( endTime );
+
+                if ( ( startTimeStamp < nowTimeStamp ) && ( nowTimeStamp < endTimeStamp ) ) {
+                    setTimeout( function() {
+                        self.MicroModalInit();
+                    }, 500 );
+                }
+            },
+            self.MicroModalInit = function (){
+                let activePopupElement = settings['wdes-popup-id'];
+
+                MicroModal.show(settings['wdes-popup-id'],{
+                    onShow: function (modle, activePopupElement){
+                        let $overlayElement      = $('.wdes-popup-overlay',modle),
+                            animeOverlayInstance = null,
+                            animeOverlaySettings = $.extend(
+                                {
+                                    targets: $overlayElement[0]
+                                },
+                                self.animeEffects[ 'fade' ][ 'show' ]
+                            ),
+                            $contentElement = $('.wdes-popup-container',modle),
+                            animeContentInstance = null,
+                            animeContentSettings = $.extend(
+                                {
+                                    targets: $contentElement[0]
+                                },
+                                self.animeEffects [settings['animation']][ 'show' ]
+                            )
+                        ;
+
+                        if ( ! self.availableCheck || isEditor ) {
+                            return false;
+                        }
+
+                        //anime Overlay
+                        animeOverlayInstance = anime(animeOverlaySettings);
+
+                        //anime Content
+                        animeContentInstance = anime(animeContentSettings);
+
+
+                    },
+                    onClose: function (modle){
+                        let $overlayElement      = $('.wdes-popup-overlay',modle),
+                            animeOverlayInstance = null,
+                            animeOverlaySettings = $.extend(
+                                {
+                                    targets: $overlayElement[0]
+                                },
+                                self.animeEffects[ 'fade' ][ 'hide' ]
+                            ),
+                            $contentElement = $('.wdes-popup-container',modle),
+                            animeContentInstance = null,
+                            animeContentSettings = $.extend(
+                                {
+                                    targets: $contentElement[0]
+                                },
+                                self.animeEffects [settings['animation']][ 'hide' ]
+                            ),
+                            constantly = settings['show-once']
+                        ;
+                        if ( constantly ) {
+                            self.setLocalStorageData( popupId, 'disable' );
+                        }
+                        //anime Overlay
+                        animeOverlayInstance = anime(animeOverlaySettings);
+
+                        //anime Content
+                        animeContentInstance = anime(animeContentSettings);
+
+                        $(modle).addClass('is-close');
+                    },
+                    disableScroll: settings['prevent-scrolling'],
+                    awaitCloseAnimation: true
+                });
+            }
+
+            self.animeEffects = {
+                'fade': {
+                    'show': {
+                        delay: 200,
+                            opacity: {
+                            value: [0, 1],
+                                duration:600,
+                                easing: 'easeOutQuart',
+                        },
+                    },
+                    'hide': {
+                        easing: 'easeOutQuart',
+                            opacity: {
+                            value: [1, 0],
+                                duration:400,
+                                easing: 'easeOutQuart',
+                        },
+                    }
+                },
+
+                'zoom-in': {
+                    'show': {
+                        duration:500,
+                            delay: 200,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [0, 1]
+                        },
+                        scale: {
+                            value:[ 0.75, 1]
+                        }
+                    },
+                    'hide': {
+                        duration:400,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [1, 0],
+                        },
+                        scale: {
+                            value:[ 1 , 0.75]
+                        }
+                    }
+                },
+
+                'zoom-out': {
+                    'show': {
+                        duration:500,
+                            delay: 200,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [0, 1]
+                        },
+                        scale: {
+                            value:[ 1.25, 1]
+                        }
+                    },
+                    'hide': {
+                        duration:400,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [1, 0],
+                        },
+                        scale: {
+                            value:[ 1 , 1.25]
+                        }
+                    }
+                },
+
+                'rotate': {
+                    'show': {
+                        duration:500,
+                            delay: 200,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [0, 1]
+                        },
+                        scale: {
+                            value:[ 0.75, 1]
+                        },
+                        rotate: {
+                            value: [ -65, 0 ]
+                        }
+                    },
+                    'hide': {
+                        duration:400,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [1, 0],
+                        },
+                        scale: {
+                            value:[ 1 , 0.9]
+                        }
+                    }
+                },
+
+                'move-up': {
+                    'show': {
+                        duration:500,
+                            delay: 200,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [0, 1]
+                        },
+                        translateY:{
+                            value: [ 50, 1]
+                        }
+                    },
+                    'hide': {
+                        duration:400,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [1, 0],
+                        },
+                        translateY:{
+                            value: [ 1, 50]
+                        }
+                    }
+                },
+
+                'flip-x': {
+                    'show': {
+                        duration:1000,
+                            delay: 200,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [0, 1]
+                        },
+                        rotateX:{
+                            value: [ 65, 0]
+                        }
+                    },
+                    'hide': {
+                        duration:400,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [1, 0],
+                        }
+                    }
+                },
+
+                'flip-y': {
+                    'show': {
+                        duration:1000,
+                            delay: 200,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [0, 1]
+                        },
+                        rotateY:{
+                            value: [ 65, 0]
+                        }
+                    },
+                    'hide': {
+                        duration:400,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [1, 0],
+                        }
+                    }
+                },
+
+                'bounce-in': {
+                    'show': {
+                        duration:1000,
+                            opacity: {
+                            value: [0, 1],
+                                delay: 500,
+                                easing: 'easeOutQuart',
+                        },
+                        scale:{
+                            value: [ 0.2, 1],
+                                delay: 800,
+                                elasticity: function(el, i, l) {
+                                return (400 + i * 200);
+                            },
+                        }
+                    },
+                    'hide': {
+                        duration:400,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [1, 0],
+                        },
+                        scale: {
+                            value:[ 1, 0.8 ]
+                        }
+                    }
+                },
+
+                'bounce-out': {
+                    'show': {
+                        duration:200,
+                            opacity: {
+                            value: [0, 1],
+                                delay: 500,
+                                easing: 'easeOutQuart',
+                        },
+                        scale:{
+                            value: [ 1.8, 1],
+                                delay: 800,
+                                elasticity: function(el, i, l) {
+                                return (400 + i * 200);
+                            },
+                        }
+                    },
+                    'hide': {
+                        duration:400,
+                            easing: 'easeOutQuart',
+                            opacity: {
+                            value: [1, 0],
+                        },
+                        scale: {
+                            value:[ 1, 1.5 ]
+                        }
+                    }
+                },
+
+                'slider-in-up' : {
+                    'show': {
+                        delay: 200,
+                            opacity: {
+                            value: [ 0, 1 ],
+                                duration: 400,
+                                easing: 'easeOutQuart',
+                        },
+                        translateY: {
+                            value: ['100vh', 0],
+                                duration: 750,
+                                easing: 'easeOutQuart',
+                        }
+                    },
+                    'hide': {
+                        duration: 400,
+                            easing: 'easeInQuart',
+                            opacity: {
+                            value: [ 1, 0 ],
+                        },
+                        translateY: {
+                            value: [0,'100vh'],
+                        }
+                    }
+                },
+
+                'slider-in-right': {
+                    'show': {
+                        delay:200,
+                            opacity: {
+                            value: [0, 1],
+                                duration: 400,
+                                easing: 'easeOutQuart',
+                        },
+                        translateX:{
+                            value: [ '100vh', 0],
+                                duration: 750,
+                                easing: 'easeOutQuart',
+                        }
+                    },
+                    'hide': {
+                        duration:400,
+                            easing: 'easeInQuart',
+                            opacity: {
+                            value: [1, 0],
+                        },
+                        translateX: {
+                            value:[ 0, '100vh' ]
+                        }
+                    }
+                },
+
+                'slider-in-down': {
+                    'show': {
+                        delay:200,
+                            opacity: {
+                            value: [0, 1],
+                                duration: 400,
+                                easing: 'easeOutQuart',
+                        },
+                        translateY:{
+                            value: [ '-100vh', 0],
+                                duration: 750,
+                                easing: 'easeOutQuart',
+                        }
+                    },
+                    'hide': {
+                        duration:400,
+                            easing: 'easeInQuart',
+                            opacity: {
+                            value: [1, 0],
+                        },
+                        translateY: {
+                            value:[ 0, '-100vh' ]
+                        }
+                    }
+                },
+
+                'slider-in-left': {
+                    'show': {
+                        delay:200,
+                            opacity: {
+                            value: [0, 1],
+                                duration: 400,
+                                easing: 'easeOutQuart',
+                        },
+                        translateX:{
+                            value: [ '-100vh', 0],
+                                duration: 750,
+                                easing: 'easeOutQuart',
+                        }
+                    },
+                    'hide': {
+                        duration:400,
+                            easing: 'easeInQuart',
+                            opacity: {
+                            value: [1, 0],
+                        },
+                        translateX: {
+                            value:[ 0, '-100vh' ]
+                        }
+                    }
+                },
+
+            }
+
+        }
+
+    }
+
+
+    $( window ).on('elementor/frontend/init', WdesPopupFrontend.init);
+
+}(jQuery, window.elementorFrontend) )
